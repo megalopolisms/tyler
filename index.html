@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<meta name="theme-color" content="#0f172a" />
+<title>Tyler Trips</title>
+
+<!-- iOS PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Tyler Trips" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/favicon.ico" />
+<link rel="stylesheet" href="css/app.css" />
+
+<!-- Alpine.js for reactivity, ~15KB -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+
+<body>
+<!-- ============================================================
+     LOCK SCREEN — shown until password unlocked.
+     Hidden the moment Alpine sets x-show=unlocked to true.
+============================================================ -->
+<div id="lock-screen" x-data="lockController()" x-show="!unlocked" x-cloak>
+  <form class="lock-card" @submit.prevent="tryUnlock">
+    <div class="lock-logo">🚚</div>
+    <h1>Tyler Trips</h1>
+    <p class="lock-sub">Enter password to continue</p>
+    <input type="password"
+           inputmode="text"
+           autocomplete="current-password"
+           x-model="password"
+           x-ref="pwInput"
+           placeholder="••••••••"
+           :disabled="checking"
+           required />
+    <button type="submit" :disabled="checking || !password">
+      <span x-show="!checking">Unlock</span>
+      <span x-show="checking">Checking…</span>
+    </button>
+    <p class="lock-error" x-show="error" x-text="error"></p>
+  </form>
+</div>
+
+<!-- ============================================================
+     MAIN APP — only mounted/visible after unlock + Firebase auth.
+============================================================ -->
+<main id="app" x-data="appController()" x-show="ready" x-cloak x-init="init">
+
+  <!-- Sticky header: tally + sync indicator -->
+  <header>
+    <div class="header-row">
+      <div class="brand">
+        <span class="dot" :class="syncClass" :title="syncLabel"></span>
+        <span>Tyler Trips</span>
+      </div>
+      <div class="filter">
+        <select x-model="tagFilter" @change="onFilterChange">
+          <option value="">All trips</option>
+          <template x-for="t in allTags" :key="t.slug">
+            <option :value="t.slug" x-text="t.name"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+    <div class="tally-bar">
+      <div class="tally-cell">
+        <div class="tally-label">Advance</div>
+        <div class="tally-val" x-text="fmt(tally.advance)"></div>
+      </div>
+      <div class="tally-cell">
+        <div class="tally-label">Owed</div>
+        <div class="tally-val" x-text="fmt(tally.owed)"></div>
+      </div>
+      <div class="tally-cell">
+        <div class="tally-label">Trip total</div>
+        <div class="tally-val" x-text="fmt(tally.total)"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Timeline grouped by day -->
+  <section class="timeline">
+    <template x-if="filteredExpenses.length === 0">
+      <div class="empty">
+        <div class="empty-icon">🧾</div>
+        <p>No expenses yet.<br/>Tap <strong>+</strong> to add one.</p>
+      </div>
+    </template>
+    <template x-for="group in groupedExpenses" :key="group.label">
+      <div class="day-group">
+        <h2 class="day-heading" x-text="group.label"></h2>
+        <template x-for="exp in group.items" :key="exp.id">
+          <article class="expense-card"
+                   :class="{ pending: exp.pending, advance: exp.flow === 'in' }"
+                   @click="openEdit(exp)">
+            <div class="expense-icon" x-text="categoryIcon(exp.category)"></div>
+            <div class="expense-body">
+              <div class="expense-line1">
+                <span class="expense-cat" x-text="categoryName(exp.category)"></span>
+                <span class="expense-amt"
+                      :class="{ negative: exp.flow === 'out' }"
+                      x-text="(exp.flow === 'in' ? '+' : '') + fmt(exp.amount)"></span>
+              </div>
+              <div class="expense-line2">
+                <span x-text="formatDate(exp.date)"></span>
+                <template x-if="exp.tag">
+                  <span class="tag-chip" x-text="exp.tag"></span>
+                </template>
+                <template x-if="exp.flow === 'out' && exp.paidWith">
+                  <span class="paidwith-chip" x-text="paidWithLabel(exp.paidWith)"></span>
+                </template>
+                <template x-if="exp.pending">
+                  <span class="pending-badge" title="Waiting to sync">⏳</span>
+                </template>
+              </div>
+              <template x-if="exp.note">
+                <div class="expense-note" x-text="exp.note"></div>
+              </template>
+            </div>
+            <template x-if="exp.receiptUrl">
+              <img class="expense-thumb" :src="exp.receiptUrl" loading="lazy" alt="receipt" />
+            </template>
+          </article>
+        </template>
+      </div>
+    </template>
+  </section>
+
+  <!-- Floating action button -->
+  <button class="fab" @click="openAdd()" aria-label="Add expense">+</button>
+
+  <!-- Add/Edit sheet (modal slide-up) -->
+  <div class="sheet-backdrop" x-show="sheetOpen" @click="closeSheet" x-cloak></div>
+  <div class="sheet" x-show="sheetOpen" x-cloak @click.stop>
+    <div class="sheet-handle"></div>
+    <h2 x-text="editing ? 'Edit expense' : 'Add expense'"></h2>
+
+    <!-- Flow toggle -->
+    <div class="flow-toggle">
+      <button type="button"
+              :class="{ active: form.flow === 'out' }"
+              @click="form.flow = 'out'">I spent</button>
+      <button type="button"
+              :class="{ active: form.flow === 'in' }"
+              @click="form.flow = 'in'">Advance received</button>
+    </div>
+
+    <!-- Amount -->
+    <label class="field">
+      <span class="field-label">Amount (USD)</span>
+      <div class="amount-input">
+        <span class="currency">$</span>
+        <input type="text" inputmode="decimal" placeholder="0.00"
+               x-model="form.amount" @input="sanitizeAmount" />
+      </div>
+    </label>
+
+    <!-- Category (only for outflows; advances are uncategorized) -->
+    <label class="field" x-show="form.flow === 'out'">
+      <span class="field-label">Category</span>
+      <div class="pill-rail">
+        <template x-for="c in allCategories" :key="c.slug">
+          <button type="button"
+                  class="pill"
+                  :class="{ active: form.category === c.slug }"
+                  @click="form.category = c.slug">
+            <span x-text="c.icon"></span>
+            <span x-text="c.name"></span>
+          </button>
+        </template>
+        <button type="button" class="pill pill-add" @click="addCategoryPrompt">+ Add</button>
+      </div>
+    </label>
+
+    <!-- Paid with (only for outflows) -->
+    <label class="field" x-show="form.flow === 'out'">
+      <span class="field-label">Paid with</span>
+      <div class="pill-rail">
+        <button type="button" class="pill"
+                :class="{ active: form.paidWith === 'advance' }"
+                @click="form.paidWith = 'advance'">Advance</button>
+        <button type="button" class="pill"
+                :class="{ active: form.paidWith === 'personal' }"
+                @click="form.paidWith = 'personal'">My pocket</button>
+        <button type="button" class="pill"
+                :class="{ active: form.paidWith === 'company' }"
+                @click="form.paidWith = 'company'">Company card</button>
+      </div>
+    </label>
+
+    <!-- Date -->
+    <label class="field">
+      <span class="field-label">Date</span>
+      <input type="date" x-model="form.date" />
+    </label>
+
+    <!-- Tag (optional) -->
+    <label class="field">
+      <span class="field-label">Tag (optional)</span>
+      <div class="pill-rail">
+        <template x-for="t in allTags" :key="t.slug">
+          <button type="button"
+                  class="pill"
+                  :class="{ active: form.tag === t.slug }"
+                  @click="toggleTag(t.slug)">
+            <span x-text="t.name"></span>
+          </button>
+        </template>
+        <button type="button" class="pill pill-add" @click="addTagPrompt">+ Add</button>
+        <button type="button" class="pill pill-clear" x-show="form.tag" @click="form.tag = ''">× Clear</button>
+      </div>
+    </label>
+
+    <!-- Receipt photo -->
+    <div class="field">
+      <span class="field-label">Receipt</span>
+      <div class="receipt-row">
+        <button type="button" class="receipt-btn" @click="$refs.fileInput.click()">
+          📷 <span x-text="form.receiptPreview ? 'Replace photo' : 'Take photo'"></span>
+        </button>
+        <input type="file" accept="image/*" capture="environment"
+               x-ref="fileInput" @change="onPhotoSelected" hidden />
+        <template x-if="form.receiptPreview">
+          <img class="receipt-preview" :src="form.receiptPreview" alt="preview" />
+        </template>
+      </div>
+    </div>
+
+    <!-- Note (optional) -->
+    <label class="field">
+      <span class="field-label">Note (optional)</span>
+      <input type="text" maxlength="280" placeholder="anything"
+             x-model="form.note" />
+    </label>
+
+    <!-- Actions -->
+    <div class="sheet-actions">
+      <template x-if="editing">
+        <button type="button" class="btn-delete" @click="confirmDelete">Delete</button>
+      </template>
+      <button type="button" class="btn-cancel" @click="closeSheet">Cancel</button>
+      <button type="button" class="btn-save"
+              :disabled="!canSave || saving"
+              @click="save">
+        <span x-show="!saving">Save</span>
+        <span x-show="saving">Saving…</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Toast (temporary status messages) -->
+  <div class="toast" x-show="toast" x-text="toast" x-cloak></div>
+</main>
+
+<!-- Module entry — loads Firebase + bootstraps controllers -->
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

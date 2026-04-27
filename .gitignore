@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Firebase CLI cache + debug
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+
+# Local emulator data
+firebase-export-*/
+
+# Misc
+*.swp
+*.swo
+*~
+node_modules/
