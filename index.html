@@ -16,18 +16,13 @@
 <link rel="icon" href="icons/favicon.ico" />
 <link rel="stylesheet" href="css/app.css" />
 
-<!-- Alpine.js for reactivity, ~15KB -->
 <!--
-  Defer Alpine's auto-start: it would otherwise scan the DOM and try to call
-  `lockController()`/`appController()` BEFORE our ES modules finish loading
-  and register them on `window`, leaving every element x-cloak'd on a blank
-  blue screen. We capture Alpine's start callback in `window.startAlpine`
-  and invoke it from the bottom of `js/app.js` once controllers are ready.
+  Alpine.js is loaded as an ES module from inside `js/app.js` (NOT here as
+  a <script> tag). This guarantees that our window.lockController and
+  window.appController are registered BEFORE Alpine starts scanning the DOM.
+  The Alpine v3 CDN script auto-starts on load, which would race our module
+  initialization and leave every element x-cloak'd on a blank blue screen.
 -->
-<script>
-  window.deferLoadingAlpine = function (cb) { window.startAlpine = cb; };
-</script>
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 
 <body>

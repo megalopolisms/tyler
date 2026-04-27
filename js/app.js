@@ -404,18 +404,15 @@ window.appController = function appController() {
 // ============================================================
 // Boot Alpine now that both controllers are registered.
 //
-// `index.html` sets `window.deferLoadingAlpine` to capture Alpine's start
-// callback into `window.startAlpine`. We invoke it here, after both
-// controllers are on `window`, so x-data="lockController()" / "appController()"
-// resolve correctly. Without this, Alpine auto-starts before our ES modules
-// finish loading and every element stays `x-cloak`'d on a blank blue screen.
+// We import Alpine as an ES module here (not via <script> tag) so the
+// load order is guaranteed: window.lockController and window.appController
+// are attached above, THEN Alpine module loads, THEN we call Alpine.start().
+//
+// The CDN <script> variant auto-starts on load and would race our module
+// initialization, leaving every element x-cloak'd on a blank blue screen.
+// The module.esm.js variant exports Alpine without auto-starting.
 // ============================================================
-function bootAlpine() {
-  if (typeof window.startAlpine === "function") {
-    window.startAlpine();
-  } else {
-    // Alpine hadn't loaded yet when we got here — wait briefly and retry.
-    setTimeout(bootAlpine, 50);
-  }
-}
-bootAlpine();
+const { default: Alpine } =
+  await import("https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/module.esm.js");
+window.Alpine = Alpine;
+Alpine.start();
