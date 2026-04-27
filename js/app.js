@@ -400,3 +400,22 @@ window.appController = function appController() {
     },
   };
 };
+
+// ============================================================
+// Boot Alpine now that both controllers are registered.
+//
+// `index.html` sets `window.deferLoadingAlpine` to capture Alpine's start
+// callback into `window.startAlpine`. We invoke it here, after both
+// controllers are on `window`, so x-data="lockController()" / "appController()"
+// resolve correctly. Without this, Alpine auto-starts before our ES modules
+// finish loading and every element stays `x-cloak`'d on a blank blue screen.
+// ============================================================
+function bootAlpine() {
+  if (typeof window.startAlpine === "function") {
+    window.startAlpine();
+  } else {
+    // Alpine hadn't loaded yet when we got here — wait briefly and retry.
+    setTimeout(bootAlpine, 50);
+  }
+}
+bootAlpine();

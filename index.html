@@ -17,6 +17,16 @@
 <link rel="stylesheet" href="css/app.css" />
 
 <!-- Alpine.js for reactivity, ~15KB -->
+<!--
+  Defer Alpine's auto-start: it would otherwise scan the DOM and try to call
+  `lockController()`/`appController()` BEFORE our ES modules finish loading
+  and register them on `window`, leaving every element x-cloak'd on a blank
+  blue screen. We capture Alpine's start callback in `window.startAlpine`
+  and invoke it from the bottom of `js/app.js` once controllers are ready.
+-->
+<script>
+  window.deferLoadingAlpine = function (cb) { window.startAlpine = cb; };
+</script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 
